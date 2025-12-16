@@ -1,0 +1,162 @@
+---
+# OHLCV Aggregator Deployment
+# Consumes trades from Kafka, produces multi-frequency candles
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ohlcv-aggregator
+  namespace: trading
+  labels:
+    app: ohlcv-aggregator
+    tier: streaming
+spec:
+  # Scale based on Kafka partition count
+  # Each replica consumes from a subset of partitions
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ohlcv-aggregator
+  template:
+    metadata:
+      labels:
+        app: ohlcv-aggregator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security context for non-root execution
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      containers:
+        - name: aggregator
+          image: ohlcv-aggregator:latest
+          imagePullPolicy: IfNotPresent
+          
+          command: ["python", "src/realtime_aggregator.py"]
+          args:
+            - "--source=kafka"
+            - "--windows=1s,10s,1m"
+          
+          env:
+            # Kafka configuration
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: KAFKA_TOPIC
+              value: "trades"
+            - name: KAFKA_GROUP_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            
+            # Consumer configuration
+            - name: KAFKA_AUTO_OFFSET_RESET
+              value: "earliest"
+            - name: KAFKA_ENABLE_AUTO_COMMIT
+              value: "true"
+            - name: KAFKA_AUTO_COMMIT_INTERVAL_MS
+              value: "1000"
+          
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+          
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          
+          # Health checks
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          
+          volumeMounts:
+            - name: output
+              mountPath: /app/output
+      
+      volumes:
+        - name: output
+          emptyDir:
+            sizeLimit: 1Gi
+      
+      # Topology spread for high availability
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: ohlcv-aggregator
+
+---
+# Service for metrics scraping
+apiVersion: v1
+kind: Service
+metadata:
+  name: ohlcv-aggregator
+  namespace: trading
+  labels:
+    app: ohlcv-aggregator
+spec:
+  selector:
+    app: ohlcv-aggregator
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+
+---
+# HorizontalPodAutoscaler based on Kafka consumer lag
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ohlcv-aggregator-hpa
+  namespace: trading
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ohlcv-aggregator
+  minReplicas: 3
+  maxReplicas: 6
+  metrics:
+    # Scale based on CPU (proxy for processing load)
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    # In production, use Kafka lag metric from KEDA or custom metrics
+    # - type: External
+    #   external:
+    #     metric:
+    #       name: kafka_consumergroup_lag
+    #       selector:
+    #         matchLabels:
+    #           consumergroup: ohlcv-aggregator
+    #     target:
+    #       type: AverageValue
+    #       averageValue: 1000

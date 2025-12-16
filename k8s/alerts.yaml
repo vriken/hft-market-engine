@@ -1,0 +1,139 @@
+---
+# Prometheus alerting rules for OHLCV Aggregator
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ohlcv-aggregator-alerts
+  namespace: trading
+  labels:
+    app: ohlcv-aggregator
+    prometheus: kube-prometheus
+spec:
+  groups:
+    - name: ohlcv-aggregator.rules
+      rules:
+        # Consumer Lag Alert
+        - alert: OHLCVAggregatorHighLag
+          expr: |
+            sum by (consumergroup) (kafka_consumergroup_lag{consumergroup="ohlcv-aggregator"}) > 10000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High Kafka consumer lag for OHLCV aggregator"
+            description: |
+              Consumer group {{ $labels.consumergroup }} has lag {{ $value }} 
+              which exceeds threshold of 10000 messages.
+              This may cause delayed candle emission.
+
+        # Critical Lag Alert
+        - alert: OHLCVAggregatorCriticalLag
+          expr: |
+            sum by (consumergroup) (kafka_consumergroup_lag{consumergroup="ohlcv-aggregator"}) > 100000
+          for: 2m
+          labels:
+            severity: critical
+            page: "true"
+          annotations:
+            summary: "CRITICAL: OHLCV aggregator severely behind"
+            description: |
+              Consumer lag is {{ $value }} messages.
+              Trading signals may be significantly delayed.
+              Immediate investigation required.
+
+        # Pod Restarts
+        - alert: OHLCVAggregatorFrequentRestarts
+          expr: |
+            increase(kube_pod_container_status_restarts_total{container="aggregator"}[1h]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "OHLCV aggregator pod restarting frequently"
+            description: |
+              Pod {{ $labels.pod }} has restarted {{ $value }} times in the last hour.
+              Check logs for OOM or crash errors.
+
+        # Processing Rate Drop
+        - alert: OHLCVAggregatorLowThroughput
+          expr: |
+            rate(ohlcv_ticks_processed_total[5m]) < 10
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Low tick processing rate"
+            description: |
+              Processing rate is {{ $value }} ticks/sec.
+              Expected minimum is 10 ticks/sec during trading hours.
+
+        # Candle Emission Rate
+        - alert: OHLCVAggregatorNoCandlesEmitted
+          expr: |
+            increase(ohlcv_candles_emitted_total[5m]) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No candles being emitted"
+            description: |
+              No candles have been emitted in the last 5 minutes.
+              Check if aggregator is stuck or Kafka is unavailable.
+
+        # Late Arrivals
+        - alert: OHLCVAggregatorHighLateArrivals
+          expr: |
+            rate(ohlcv_late_arrivals_total[5m]) / rate(ohlcv_ticks_processed_total[5m]) > 0.01
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High late arrival rate"
+            description: |
+              {{ $value | humanizePercentage }} of ticks are arriving late.
+              Consider increasing watermark or investigating upstream delays.
+
+        # Memory Usage
+        - alert: OHLCVAggregatorHighMemory
+          expr: |
+            container_memory_usage_bytes{container="aggregator"} / 
+            container_spec_memory_limit_bytes{container="aggregator"} > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory usage in OHLCV aggregator"
+            description: |
+              Memory usage is at {{ $value | humanizePercentage }}.
+              May indicate state accumulation or memory leak.
+
+        # Drift Detection (from batch reconciliation)
+        - alert: OHLCVAggregatorHighDrift
+          expr: |
+            ohlcv_drift_percentage > 0.5
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "High drift between real-time and batch candles"
+            description: |
+              Drift is {{ $value }}% which exceeds 0.5% threshold.
+              Real-time candles may be inaccurate.
+
+---
+# ServiceMonitor for Prometheus Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ohlcv-aggregator
+  namespace: trading
+  labels:
+    app: ohlcv-aggregator
+spec:
+  selector:
+    matchLabels:
+      app: ohlcv-aggregator
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics

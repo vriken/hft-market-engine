@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment & Secrets
+.env
+.env.local
+
+# Logs
+*.log
+
+# Project Output (Ignore all generated data)
+output/
+data/
+
+# Archive Plans (but keep questions)
+docs/archive/*
+!docs/archive/questions.txt

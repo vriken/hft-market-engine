@@ -1,0 +1,49 @@
+Is "emit corrections" the best option?
+   It depends on what downstream systems can handle. Let's compare:
+
+   Option A: Emit Corrections (Complex but "Correct")
+
+     10:01:00 → Emit candle v1: {open: 100, close: 102, ...}
+     10:01:03 → Late tick arrives for 10:00:45
+     10:01:03 → Emit candle v2: {open: 99, close: 102, ...}  ← CORRECTION
+
+   Pros:
+
+     - Most accurate
+     - No data loss
+
+   Cons:
+
+     - Downstream must handle updates (not just inserts)
+     - Databases need upsert logic
+     - Dashboards might flicker
+     - Trading models need to handle "candle changed after I made a decision"
+     - Complexity explodes
+
+   Option B: Accept Inaccuracy (Pragmatic)
+
+   The key question: How much data is actually late?
+
+     # Measure your actual disorder
+     late_ticks = count(ticks where arrival_time - event_time > watermark)
+     total_ticks = count(all ticks)
+     late_rate = late_ticks / total_ticks
+
+     # Typical results for well-designed systems:
+     # - Same datacenter: 0.001% late (almost never)
+     # - Cross-region: 0.1-1% late
+     # - Unreliable vendor feed: 5-10% late
+
+   If 0.1% of ticks are late, your candle is 99.9% accurate. For most trading signals, that's fine.
+
+   When inaccuracy is NOT acceptable:
+
+     - Regulatory reporting (must be exact)
+     - P&L calculation (money is involved)
+     - Audit trails
+
+   When inaccuracy IS acceptable:
+
+     - Real-time dashboards (humans won't notice)
+     - Trading signals (speed > perfect accuracy)
+     - Anomaly detection (approximate is fine)
