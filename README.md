@@ -110,13 +110,13 @@ graph LR
   - `k8s/alerts.yaml`: Prometheus rules for lag, drift, and memory
 - **Build:** `docker build -t ohlcv-aggregator .`
 
-### Challenge 5: Ultra-Low Latency (Sub-Second)
-**Goal:** Process 500k trades in <1 second.
+### Challenge 5: Low-Latency Optimizations
+**Goal:** Maximize throughput for Python-based streaming.
 - **Solution:**
-  - **Protocol:** Integer-based CSV (Internet Microseconds) to avoid `datetime` parsing.
+  - **Protocol:** Integer-based CSV (Integer Microseconds) to avoid `datetime` parsing.
   - **Zero-Copy:** Parsing raw `bytes` directly in Python.
   - **Hyper-Loop:** Inlined aggregation logic (no function calls).
-- **Result:** **Verified 693k TPS** (Isolated Burst), ~50k TPS (Full System Local).
+- **Result:** **~50k TPS** end-to-end (Producer → Kafka → Aggregator → Disk).
 
 ### Challenge 6: Chaos Engineering
 **Goal:** Resilience against malformed data.

@@ -1,11 +1,11 @@
 # 🏗 Architecture & Engineering Decisions
 
-## 1. Ultra-Low Latency Optimization
-**Goal**: Achieve >500,000 TPS on a single core (Sub-Second processing for 500k trades).
+## 1. Low-Latency Optimization
+**Goal**: Maximize throughput for a Python-based streaming pipeline.
 
 ### ❌ Initial Bottlenecks
--   **JSON Parsing**: `json.loads` is too slow for 500k ops/sec.
--   **Datetime Objects**: Python's `datetime` creation overhead is significant (microseconds add up).
+-   **JSON Parsing**: `json.loads` adds significant overhead per message.
+-   **Datetime Objects**: Python's `datetime` creation overhead accumulates at scale.
 -   **Object Allocation**: Creating `Trade` objects for every tick triggers GC pressure.
 
 ### ✅ The Solution: "Integer Protocol"
@@ -15,7 +15,7 @@ We switched to a raw byte-processing pipeline:
 3.  **Zero-Copy**: The Aggregator parses `bytes` directly (`msg.value().split(b',')`).
 4.  **Inlined Loop**: The windowing logic is inlined into the consumer loop to remove function call overhead.
 
-**Result**: Throughput increased from ~150k TPS to **~600k TPS** (300% Speedup).
+**Result**: End-to-end throughput of **~50k TPS** (Producer → Kafka → Aggregator → Disk).
 
 ---
 
