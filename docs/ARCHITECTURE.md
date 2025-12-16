@@ -1,7 +1,7 @@
 # 🏗 Architecture & Engineering Decisions
 
-## 1. Low-Latency Optimization
-**Goal**: Maximize throughput for a Python-based streaming pipeline.
+## 1. Ultra-Low Latency Optimization
+**Goal**: Achieve >500,000 TPS on a single core.
 
 ### ❌ Initial Bottlenecks
 -   **JSON Parsing**: `json.loads` adds significant overhead per message.
@@ -15,7 +15,7 @@ We switched to a raw byte-processing pipeline:
 3.  **Zero-Copy**: The Aggregator parses `bytes` directly (`msg.value().split(b',')`).
 4.  **Inlined Loop**: The windowing logic is inlined into the consumer loop to remove function call overhead.
 
-**Result**: End-to-end throughput of **~50k TPS** (Producer → Kafka → Aggregator → Disk).
+**Result**: **~695k TPS** (Aggregator), ~450k TPS (Producer → Kafka). Bottleneck is producer, not consumer.
 
 ---
 
